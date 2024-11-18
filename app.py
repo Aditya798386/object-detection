@@ -1,92 +1,71 @@
-from flask import Flask, request, jsonify
-from PIL import Image
-import numpy as np
-import matplotlib.pyplot as plt
-import base64
-import io
-import os
-import tensorflow as tf
+import torch
+import cv2
+from ultralytics import YOLO
 
-from backend.tf_inference import inference  # Inference function for testing
+# Load the pretrained YOLO model (replace 'yolov8n.pt' with your model path if needed)
+model = YOLO('yolov8n.pt')  # Adjust this if you're using a custom YOLO model
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+# Initialize the camera
+cap = cv2.VideoCapture(0)
 
-app = Flask(__name__)
+# Check if the camera opened successfully
+if not cap.isOpened():
+    print("Error: Could not open camera.")
+    exit()
 
-# Load model (or create it if training)
-def create_model():
-    model = tf.keras.applications.MobileNetV2(input_shape=(224, 224, 3), include_top=False)
-    model = tf.keras.Sequential([
-        model,
-        tf.keras.layers.GlobalAveragePooling2D(),
-        tf.keras.layers.Dense(1, activation='sigmoid')  # Adjust for object detection tasks
-    ])
-    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-    return model
+# Loop for real-time object detection
+while True:
+    # Capture frame-by-frame
+    ret, frame = cap.read()
+    if not ret:
+        print("Failed to grab frame.")
+        break
 
-model = create_model()  # Instantiate model
+    # Run YOLO object detection on the frame
+    results = model(frame)
 
-# Placeholder training data
-def load_training_data():
-    # Replace with actual data loading code
-    images = np.random.rand(100, 224, 224, 3)  # Dummy data
-    labels = np.random.randint(0, 2, 100)      # Dummy labels (binary)
-    return images, labels
+    # Initialize counters for humans and objects
+    human_count = 0
+    total_objects = 0
 
-# Training function
-@app.route('/api/train', methods=["POST"])
-def train_model():
-    images, labels = load_training_data()
-    history = model.fit(images, labels, epochs=10, validation_split=0.2)
+    # Process each detection result
+    for result in results:
+        # Access each bounding box in the result
+        for box in result.boxes:
+            # Get the bounding box coordinates, confidence score, and class ID
+            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())  # Convert to integers
+            confidence = box.conf[0].item()                  # Convert confidence to float
+            class_id = int(box.cls[0].item())                # Convert class ID to integer
+            
+            # Get the class label and format label text
+            label = model.names[class_id]
+            label_text = f"{label} {confidence:.2f}"
 
-    return jsonify({
-        'status': 'Training complete',
-        'accuracy': history.history['accuracy'][-1],
-        'val_accuracy': history.history['val_accuracy'][-1]
-    })
+            # Check if the detected object is a human
+            if label.lower() == 'person':  # Assuming 'person' is the class name for humans
+                human_count += 1
+            total_objects += 1
 
-# Testing function using existing inference code
-@app.route('/api/test', methods=["POST"])
-def test_model():
-    response = request.get_json()
-    data_str = response['image']
-    point = data_str.find(',')
-    base64_str = data_str[point:]  # Remove unused part
+            # Draw the bounding box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Green bounding box
 
-    image = base64.b64decode(base64_str)
-    img = Image.open(io.BytesIO(image))
+            # Draw the label above the bounding box
+            cv2.putText(frame, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, (0, 255, 0), 2)  # Green label text
 
-    if img.mode != 'RGB':
-        img = img.convert("RGB")
-    
-    # Convert to numpy array
-    img_arr = np.array(img)
+    # Display the total counts on the frame
+    cv2.putText(frame, f'Total Humans: {human_count}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                1, (0, 255, 0), 2)
+    cv2.putText(frame, f'Total Objects: {total_objects}', (10, 60), cv2.FONT_HERSHEY_SIMPLEX,
+                1, (0, 255, 0), 2)
 
-    # Perform object detection (testing)
-    results = inference(sess, detection_graph, img_arr, conf_thresh=0.5)
-    
-    # Plot detected objects with bounding boxes
-    plot_detections(img_arr, results)
+    # Display the resulting frame
+    cv2.imshow('Real-time Object Detection', frame)
 
-    return jsonify(results)
+    # Break the loop if 'q' is pressed
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
-def plot_detections(img_arr, results):
-    plt.figure(figsize=(10, 10))
-    plt.imshow(img_arr)
-    for obj in results['objects']:
-        ymin, xmin, ymax, xmax = obj['box']
-        plt.gca().add_patch(
-            plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, edgecolor='red', facecolor='none', linewidth=2)
-        )
-        plt.text(xmin, ymin, obj['name'], color='red', fontsize=12, bbox=dict(facecolor='white', alpha=0.5))
-    plt.axis('off')
-    plt.show()
-
-@app.after_request
-def add_headers(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    return response
-
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0')
+# Release the camera and close all OpenCV windows
+cap.release()
+cv2.destroyAllWindows()
