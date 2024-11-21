@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Object Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            min-height: 100vh;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 20px;
+        }
+        img {
+            width: 60%;
+            height: auto;
+            border: 2px solid #ccc;
+            border-radius: 8px;
+            margin-top: 20px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+        select, input, button {
+            font-size: 1rem;
+            padding: 10px;
+            margin: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Object Detection</h1>
+    <form id="controlForm" enctype="multipart/form-data">
+        <label for="source">Select Video Source:</label>
+        <select id="source" name="source">
+            <option value="pre-recorded" selected>Pre-Recorded Video</option>
+            <option value="camera">Real-Time Camera</option>
+        </select>
+        <br>
+        <label for="videoFile">Choose Video File:</label>
+        <input type="file" id="videoFile" name="videoFile" accept="video/*">
+        <br>
+        <button type="submit">Start</button>
+    </form>
+    <img id="videoFeed" src="/video_feed" alt="Object Detection Feed">
+
+    <script>
+        const form = document.getElementById('controlForm');
+        const videoFeed = document.getElementById('videoFeed');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const source = document.getElementById('source').value;
+            const videoFile = document.getElementById('videoFile').files[0];
+
+            if (source === 'camera') {
+                await fetch('/set_source', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source: 'camera' })
+                });
+            } else if (videoFile) {
+                const formData = new FormData();
+                formData.append('videoFile', videoFile);
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                await fetch('/set_source', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source: 'uploaded', filename: result.filename })
+                });
+            }
+
+            // Refresh the video feed done
+            videoFeed.src = `${videoFeed.src.split('?')[0]}?${new Date().getTime()}`;
+        });
+    </script>
+</body>
+</html>
